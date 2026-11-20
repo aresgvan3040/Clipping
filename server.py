@@ -213,29 +213,19 @@ def ai_rank_stream_moments(
         return None
     try:
         import requests
-        transcript_sample = "
-".join(
+        transcript_sample = "\n".join(
             f"[{int(s['start']//60)}:{int(s['start']%60):02d}] {s['text']}"
             for s in all_subs[::max(1, len(all_subs) // 180)][:180]
         )
-        cand_text = "
-".join(
+        cand_text = "\n".join(
             f"- t={c['peak_time']}s score={c['score']}" for c in candidates[:80]
         )
         prompt = (
-            f"You are a stream highlight editor. Video duration is {int(duration)}s.
-"
+            f"You are a stream highlight editor. Video duration is {int(duration)}s.\n"
             "Given candidate audio/motion/heatmap peaks and transcript lines across the full stream, "
-            "pick the best, most exciting moments from start to end (no artificial limit) and give each a short 3-6 word title.
-"
-            "Return ONLY a JSON array of objects: [{"peak_time": <number>, "title": <string>}].
-
-"
-            f"Candidate peaks:
-{cand_text}
-
-Transcript sample:
-{transcript_sample}"
+            "pick the best, most exciting moments from start to end (no artificial limit) and give each a short 3-6 word title.\n"
+            "Return ONLY a JSON array of objects: [{\"peak_time\": <number>, \"title\": <string>}].\n\n"
+            f"Candidate peaks:\n{cand_text}\n\nTranscript sample:\n{transcript_sample}"
         )
         resp = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
