@@ -97,12 +97,13 @@ def get_video_info(video_path: Path) -> Dict[str, Any]:
     return {"duration": duration, "width": width, "height": height, "has_audio": has_audio}
 
 
-def detect_audio_hikes(video_path: Path, duration: float, max_clips: int) -> List[Dict[str, float]]:
-    """Fallback hike detector using per-second FFmpeg audio RMS energy spikes."""
+def detect_audio_hikes(video_path: Path, duration: float) -> Dict[int, float]:
+    """Analyze full-video audio RMS energy per second."""
     cmd = [
         "ffmpeg",
         "-i",
         str(video_path),
+        "-vn",
         "-af",
         "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
         "-f",
@@ -110,7 +111,7 @@ def detect_audio_hikes(video_path: Path, duration: float, max_clips: int) -> Lis
         "-",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    timeline: List[Dict[str, float]] = []
+    buckets: Dict[int, List[float]] = {}
     cur_t = 0.0
     for line in proc.stdout.splitlines():
         if line.startswith("frame:"):
@@ -126,22 +127,77 @@ def detect_audio_hikes(video_path: Path, duration: float, max_clips: int) -> Lis
             except ValueError:
                 db = -80.0
             score = max(0.0, min(1.0, (db + 60.0) / 50.0))
-            timeline.append({"t": round(cur_t, 2), "score": round(score, 3)})
+            buckets.setdefault(int(cur_t), []).append(score)
+    return {sec: sum(vals) / len(vals) for sec, vals in buckets.items()}
 
-    if not timeline:
-        # Silent or unparsed: create evenly spaced synthetic points
-        steps = max(2, min(max_clips, int(max(2, duration // 35))))
-        return [
-            {"t": round((i + 1) * duration / (steps + 1), 2), "score": round(0.9 - i * 0.05, 2)}
-            for i in range(steps)
-        ]
 
-    # Bin into 1-second buckets
+def detect_motion_hikes(video_path: Path, duration: float) -> Dict[int, float]:
+    """Analyze full-video visual movement & scene-change intensity per second."""
+    cmd = [
+        "ffmpeg",
+        "-i",
+        str(video_path),
+        "-an",
+        "-vf",
+        "fps=2,scale=320:-1,select='gte(scene,0)',metadata=print:key=lavfi.scene_score:file=-",
+        "-f",
+        "null",
+        "-",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     buckets: Dict[int, List[float]] = {}
-    for pt in timeline:
-        sec = int(pt["t"])
-        buckets.setdefault(sec, []).append(pt["score"])
-    return [{"t": float(sec), "score": round(sum(vals) / len(vals), 3)} for sec, vals in sorted(buckets.items())]
+    cur_t = 0.0
+    for line in proc.stdout.splitlines():
+        if line.startswith("frame:"):
+            m = re.search(r"pts_time:([0-9.]+)", line)
+            if m:
+                cur_t = float(m.group(1))
+        elif "lavfi.scene_score=" in line:
+            try:
+                val = float(line.split("=", 1)[1].strip())
+            except ValueError:
+                val = 0.0
+            # Amplify typical 0.02-0.40 motion/scene scores into 0..1
+            score = max(0.0, min(1.0, val * 3.0))
+            buckets.setdefault(int(cur_t), []).append(score)
+    return {sec: max(vals) for sec, vals in buckets.items()}
+
+
+def analyze_full_video_hikes(
+    video_path: Path,
+    duration: float,
+    yt_heatmap: Optional[List[Dict[str, float]]] = None,
+) -> List[Dict[str, float]]:
+    """Combine YouTube heatmap (if any) + full-video audio spikes + visual motion."""
+    total_secs = max(1, int(math.ceil(duration)))
+    audio_map = detect_audio_hikes(video_path, duration)
+    motion_map = detect_motion_hikes(video_path, duration)
+
+    yt_map: Dict[int, float] = {}
+    if yt_heatmap:
+        for pt in yt_heatmap:
+            yt_map[int(pt["t"])] = pt["score"]
+
+    raw_scores: List[float] = []
+    for sec in range(total_secs):
+        a = audio_map.get(sec, 0.2)
+        m = motion_map.get(sec, 0.15)
+        if yt_map:
+            # Nearest heatmap bucket
+            y = yt_map.get(sec, yt_map.get(max(0, sec - 1), 0.3))
+            combined = 0.60 * y + 0.25 * a + 0.15 * m
+        else:
+            combined = 0.55 * a + 0.45 * m
+        raw_scores.append(combined)
+
+    # 3-second smoothing window so sustained action peaks rank highest
+    smoothed: List[Dict[str, float]] = []
+    for sec in range(total_secs):
+        lo = max(0, sec - 1)
+        hi = min(total_secs, sec + 2)
+        avg = sum(raw_scores[lo:hi]) / (hi - lo)
+        smoothed.append({"t": float(sec), "score": round(min(1.0, avg), 3)})
+    return smoothed
 
 
 def pick_hike_clips(
@@ -436,15 +492,12 @@ async def analyze_link(req: AnalyzeRequest):
     duration = info["duration"] or float(meta.get("duration") or 0)
 
     heatmap_raw = meta.get("heatmap") or []
-    if heatmap_raw:
-        heatmap_pts = [
-            {"t": round((pt["start_time"] + pt["end_time"]) / 2.0, 2), "score": round(float(pt["value"]), 3)}
-            for pt in heatmap_raw
-        ]
-        source_type = "youtube_heatmap"
-    else:
-        heatmap_pts = detect_audio_hikes(source_path, duration, req.max_clips)
-        source_type = "audio_energy"
+    yt_pts = [
+        {"t": round((pt["start_time"] + pt["end_time"]) / 2.0, 2), "score": round(float(pt["value"]), 3)}
+        for pt in heatmap_raw
+    ] if heatmap_raw else None
+    heatmap_pts = analyze_full_video_hikes(source_path, duration, yt_pts)
+    source_type = "youtube_heatmap+motion" if yt_pts else "audio+motion"
 
     clips = pick_hike_clips(heatmap_pts, duration, req.max_clips, source_type)
 
@@ -488,8 +541,8 @@ async def upload_video(file: UploadFile = File(...), max_clips: int = Form(6)):
 
     info = get_video_info(source_path)
     duration = info["duration"]
-    heatmap_pts = detect_audio_hikes(source_path, duration, max_clips)
-    clips = pick_hike_clips(heatmap_pts, duration, max_clips, "audio_energy")
+    heatmap_pts = analyze_full_video_hikes(source_path, duration, None)
+    clips = pick_hike_clips(heatmap_pts, duration, max_clips, "audio+motion")
     for clip in clips:
         clip["captions"] = []
 
@@ -507,7 +560,7 @@ async def upload_video(file: UploadFile = File(...), max_clips: int = Form(6)):
         "duration": duration,
         "width": info["width"],
         "height": info["height"],
-        "heatmap_source": "audio_energy",
+        "heatmap_source": "audio+motion",
         "heatmap": heatmap_pts,
         "clips": clips,
         "video_url": f"/api/video/{job_id}",
