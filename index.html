@@ -48,6 +48,10 @@
         <label class="block text-xs font-semibold text-slate-200 mb-1.5">YouTube Cookies (Optional — fixes cloud IP bot check)</label>
         <textarea id="yt-cookies-input" rows="3" placeholder="Paste Netscape cookies.txt content here if Render/Railway shows 'Sign in to confirm you are not a bot'..." class="w-full px-3 py-2 rounded-xl bg-[#090b10] border border-slate-700/80 text-xs text-slate-200 font-mono placeholder-slate-500 focus:outline-none focus:border-indigo-500"></textarea>
       </div>
+      <div class="mb-4">
+        <label class="block text-xs font-semibold text-slate-200 mb-1.5">Gemini AI Key (Optional — AI highlight ranking &amp; titles)</label>
+        <input id="gemini-key-input" type="password" placeholder="AIza..." class="w-full px-3 py-2 rounded-xl bg-[#090b10] border border-slate-700/80 text-xs text-slate-200 font-mono placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+      </div>
       <div class="flex justify-end gap-2">
         <button id="save-cookies-btn" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">Save Cookies</button>
         <button id="ok-server-modal" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition">Close</button>
@@ -91,13 +95,12 @@
           <label class="flex items-center gap-2 bg-[#090b10] border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-slate-300">
             <span>Clips:</span>
             <select id="clip-count-select" class="bg-transparent text-white font-semibold focus:outline-none cursor-pointer">
-              <option value="2" class="bg-slate-900">2 clips</option>
-              <option value="3" class="bg-slate-900">3 clips</option>
-              <option value="4" class="bg-slate-900">4 clips</option>
-              <option value="5" class="bg-slate-900" selected>5 clips</option>
-              <option value="6" class="bg-slate-900">6 clips</option>
-              <option value="8" class="bg-slate-900">8 clips</option>
+              <option value="0" class="bg-slate-900" selected>Auto (All Best)</option>
+              <option value="5" class="bg-slate-900">5 clips</option>
               <option value="10" class="bg-slate-900">10 clips</option>
+              <option value="15" class="bg-slate-900">15 clips</option>
+              <option value="25" class="bg-slate-900">25 clips</option>
+              <option value="50" class="bg-slate-900">50 clips</option>
             </select>
           </label>
 
@@ -205,6 +208,12 @@
             <button data-fc-preset="tr" class="fc-preset-btn px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">Top-Right</button>
             <button data-fc-preset="tl" class="fc-preset-btn px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">Top-Left</button>
             <button id="reset-main-crop" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-indigo-300 hover:bg-slate-700 ml-auto">Reset Main Box</button>
+          </div>
+          <div id="facecam-sliders" class="grid grid-cols-4 gap-2 pt-1 border-t border-slate-800/80 text-[10px] text-slate-400">
+            <label>X <input id="fc-x-slider" type="range" min="0" max="0.9" step="0.01" class="w-full accent-amber-400" /></label>
+            <label>Y <input id="fc-y-slider" type="range" min="0" max="0.9" step="0.01" class="w-full accent-amber-400" /></label>
+            <label>W <input id="fc-w-slider" type="range" min="0.1" max="0.8" step="0.01" class="w-full accent-amber-400" /></label>
+            <label>H <input id="fc-h-slider" type="range" min="0.1" max="0.8" step="0.01" class="w-full accent-amber-400" /></label>
           </div>
         </div>
 
@@ -455,14 +464,17 @@
 
       function buildDemoHikes(duration, count) {
         const pts = [];
-        const peaks = [26, 48, 72, 37, 61, 82, 19, 55, 67, 42];
-        for (let t = 0; t <= duration; t += Math.max(1, Math.floor(duration / 90))) {
-          let val = 0.18 + 0.08 * Math.sin(t * 0.35);
-          peaks.slice(0, count).forEach((p, idx) => {
-            const dist = Math.abs(t - (p / 90) * duration);
-            val += Math.exp(-(dist * dist) / Math.max(18, duration * 0.25)) * (0.78 - idx * 0.04);
+        const target = count > 0 ? count : Math.max(4, Math.min(30, Math.floor(duration / 60)));
+        const step = Math.max(1, duration / 120);
+        const peakTimes = Array.from({ length: target }, (_, i) => ((i + 0.5) / target) * duration);
+        for (let t = 0; t <= duration; t += step) {
+          let val = 0.18 + 0.08 * Math.sin((t / Math.max(1, duration)) * 32);
+          peakTimes.forEach((pt, idx) => {
+            const dist = Math.abs(t - pt);
+            const width = Math.max(12, duration * 0.03);
+            val += Math.exp(-(dist * dist) / width) * (0.78 - (idx % 5) * 0.04);
           });
-          pts.push({ t, score: Math.min(1, Math.max(0.05, Number(val.toFixed(3)))) });
+          pts.push({ t: Number(t.toFixed(1)), score: Math.min(1, Math.max(0.05, Number(val.toFixed(3)))) });
         }
         return pts;
       }
@@ -477,7 +489,7 @@
       }
 
       function pickHikeClipsFromHeatmap(heatmap, duration, maxClips) {
-        const count = Math.max(2, Math.min(10, maxClips));
+        const count = maxClips <= 0 ? Math.max(2, Math.min(40, Math.floor(duration / 60) || 5)) : Math.max(2, maxClips);
         if (duration <= 30) {
           return [{
             id: "clip_1",
@@ -605,8 +617,8 @@
         const s = Math.floor(clip.start);
         const e = Math.ceil(clip.end);
         const ap = autoPlay ? 1 : 0;
-        const mainSrc = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&end=${e}&autoplay=${ap}&rel=0&playsinline=1`;
-        const fcSrc = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&end=${e}&autoplay=${ap}&mute=1&controls=0&rel=0&playsinline=1`;
+        const mainSrc = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&end=${e}&autoplay=${ap}&enablejsapi=1&rel=0&playsinline=1`;
+        const fcSrc = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&end=${e}&autoplay=${ap}&mute=1&controls=0&enablejsapi=1&rel=0&playsinline=1`;
         el.ytPreviewMainIframe.src = mainSrc;
         if (state.facecamEnabled) {
           el.ytPreviewFcIframe.src = fcSrc;
@@ -779,6 +791,11 @@
         applyBox(el.mainCropBox, state.mainBox);
         applyBox(el.facecamCropBox, state.facecamBox);
         el.facecamCropBox.style.display = state.facecamEnabled ? "block" : "none";
+        const xs = document.getElementById("fc-x-slider");
+        const ys = document.getElementById("fc-y-slider");
+        const ws = document.getElementById("fc-w-slider");
+        const hs = document.getElementById("fc-h-slider");
+        if (xs) { xs.value = state.facecamBox.x; ys.value = state.facecamBox.y; ws.value = state.facecamBox.w; hs.value = state.facecamBox.h; }
       }
 
       function enableDragResize(boxEl, key) {
@@ -866,11 +883,18 @@
 
         if (src && srcW > 0 && srcH > 0) {
           if (state.facecamEnabled) {
-            const topH = Math.round(dims.h * 0.35);
-            const botH = dims.h - topH;
             const fc = state.facecamBox;
             const mn = state.mainBox;
-            drawCroppedCover(ctx, src, fc.x * srcW, fc.y * srcH, fc.w * srcW, fc.h * srcH, 0, 0, dims.w, topH);
+            const fcPxW = Math.max(1, fc.w * srcW);
+            const fcPxH = Math.max(1, fc.h * srcH);
+            const idealTopH = dims.w * (fcPxH / fcPxW);
+            const topH = Math.round(Math.max(dims.h * 0.22, Math.min(dims.h * 0.48, idealTopH)));
+            const botH = dims.h - topH;
+            // Draw exact facecam box without cutting off head/chin
+            const scale = Math.min(dims.w / fcPxW, topH / fcPxH);
+            const dw = fcPxW * scale;
+            const dh = fcPxH * scale;
+            ctx.drawImage(src, fc.x * srcW, fc.y * srcH, fcPxW, fcPxH, (dims.w - dw) / 2, (topH - dh) / 2, dw, dh);
             drawCroppedCover(ctx, src, mn.x * srcW, mn.y * srcH, mn.w * srcW, mn.h * srcH, 0, topH, dims.w, botH);
             ctx.fillStyle = "rgba(255,255,255,0.2)";
             ctx.fillRect(0, topH - 1, dims.w, 2);
@@ -927,10 +951,18 @@
         }
       }
 
+      function sendYouTubeCmd(func, args = []) {
+        const msg = JSON.stringify({ event: "command", func, args });
+        [el.ytPreviewMainIframe, el.ytPreviewFcIframe].forEach((ifr) => {
+          try { ifr?.contentWindow?.postMessage(msg, "*"); } catch (_) {}
+        });
+      }
+
       function stopClipPlayback() {
         state.isPlayingClip = false;
         if (state.rafId) cancelAnimationFrame(state.rafId);
         if (state.sourceMode === "file") el.sourceVideo.pause();
+        if (state.sourceMode === "youtube") sendYouTubeCmd("pauseVideo");
         document.getElementById("clip-play-icon").setAttribute("data-lucide", "play");
         if (window.lucide) window.lucide.createIcons();
       }
@@ -950,7 +982,12 @@
           el.sourceVideo.currentTime = clip.start + localT;
           el.sourceVideo.play().catch(() => {});
         } else if (state.sourceMode === "youtube") {
-          updateYouTubePreview(clip, true);
+          if (!el.ytPreviewMainIframe.src.includes(state.ytVideoId)) {
+            updateYouTubePreview(clip, true);
+          } else {
+            sendYouTubeCmd("seekTo", [clip.start + localT, true]);
+            sendYouTubeCmd("playVideo");
+          }
         }
 
         let lastTs = performance.now();
@@ -1062,7 +1099,7 @@
             const res = await fetch("/api/analyze", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url, max_clips: maxClips, cookies_txt: (document.getElementById("yt-cookies-input")?.value || "").trim() || null }),
+              body: JSON.stringify({ url, max_clips: maxClips, cookies_txt: (document.getElementById("yt-cookies-input")?.value || "").trim() || null, gemini_api_key: (document.getElementById("gemini-key-input")?.value || "").trim() || null }),
             });
             if (!res.ok) {
               let detail = await res.text();
@@ -1166,6 +1203,9 @@
           el.sourceVideo.src = objUrl;
           syncSourceModeUI();
           el.sourceVideo.onloadedmetadata = () => {
+            if (el.sourceVideo.videoWidth && el.sourceVideo.videoHeight) {
+              el.sourceStage.style.aspectRatio = `${el.sourceVideo.videoWidth} / ${el.sourceVideo.videoHeight}`;
+            }
             const dur = el.sourceVideo.duration || 90;
             state.duration = dur;
             state.title = file.name;
@@ -1203,9 +1243,10 @@
       el.closeServerModal.addEventListener("click", () => el.serverModal.classList.add("hidden"));
       el.okServerModal.addEventListener("click", () => el.serverModal.classList.add("hidden"));
       const cookiesInp = document.getElementById("yt-cookies-input");
-      try { if (cookiesInp && localStorage.getItem("hc_yt_cookies")) cookiesInp.value = localStorage.getItem("hc_yt_cookies"); } catch (_) {}
+      const geminiInp = document.getElementById("gemini-key-input");
+      try { if (cookiesInp && localStorage.getItem("hc_yt_cookies")) cookiesInp.value = localStorage.getItem("hc_yt_cookies"); if (geminiInp && localStorage.getItem("hc_gemini_key")) geminiInp.value = localStorage.getItem("hc_gemini_key"); } catch (_) {}
       document.getElementById("save-cookies-btn")?.addEventListener("click", () => {
-        try { localStorage.setItem("hc_yt_cookies", cookiesInp.value); } catch (_) {}
+        try { localStorage.setItem("hc_yt_cookies", cookiesInp.value); if (geminiInp) localStorage.setItem("hc_gemini_key", geminiInp.value); } catch (_) {}
         el.serverModal.classList.add("hidden");
         toast("YouTube cookies saved! Try Analyze Hikes again.", "success");
       });
@@ -1266,6 +1307,17 @@
         });
       });
 
+      ["fc-x-slider", "fc-y-slider", "fc-w-slider", "fc-h-slider"].forEach((id) => {
+        document.getElementById(id)?.addEventListener("input", () => {
+          state.facecamBox.w = Number(document.getElementById("fc-w-slider").value);
+          state.facecamBox.h = Number(document.getElementById("fc-h-slider").value);
+          state.facecamBox.x = Math.min(1 - state.facecamBox.w, Number(document.getElementById("fc-x-slider").value));
+          state.facecamBox.y = Math.min(1 - state.facecamBox.h, Number(document.getElementById("fc-y-slider").value));
+          updateCropBoxesUI();
+          drawPreviewFrame(Number(el.clipScrub.value));
+        });
+      });
+
       el.resetMainCrop.addEventListener("click", () => {
         state.mainBox = { x: 0, y: 0, w: 1, h: 1 };
         updateCropBoxesUI();
@@ -1303,6 +1355,9 @@
         el.clipTimeReadout.textContent = `${val.toFixed(1)}s / ${dur.toFixed(0)}s`;
         if (state.sourceMode === "file" && clip) {
           el.sourceVideo.currentTime = clip.start + val;
+        } else if (state.sourceMode === "youtube" && clip) {
+          sendYouTubeCmd("seekTo", [clip.start + val, true]);
+          sendYouTubeCmd("pauseVideo");
         }
         drawPreviewFrame(val);
       });
@@ -1382,6 +1437,26 @@
       updateCropBoxesUI();
       loadDemo();
       window.addEventListener("resize", renderHeatmap);
+      window.addEventListener("message", (ev) => {
+        if (state.sourceMode !== "youtube" || typeof ev.data !== "string") return;
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.event === "infoDelivery" && msg.info) {
+            if (typeof msg.info.duration === "number" && msg.info.duration > 30 && Math.abs(msg.info.duration - state.duration) > 10) {
+              state.duration = Math.floor(msg.info.duration);
+              const mc = Number(el.clipCountSelect.value);
+              state.heatmap = buildDemoHikes(state.duration, mc);
+              state.clips = pickHikeClipsFromHeatmap(state.heatmap, state.duration, mc);
+              el.durationLabel.textContent = `00:00 / ${fmtTime(state.duration)}`;
+              renderClipsGrid();
+              renderHeatmap();
+            }
+            if (typeof msg.info.playerState === "number" && msg.info.playerState === 2 && state.isPlayingClip) {
+              stopClipPlayback();
+            }
+          }
+        } catch (_) {}
+      });
       if (window.lucide) window.lucide.createIcons();
     })();
   </script>

@@ -51,8 +51,9 @@ class CaptionLine(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     url: str
-    max_clips: int = Field(6, ge=2, le=10)
+    max_clips: int = Field(0, ge=0, le=200)
     cookies_txt: Optional[str] = None
+    gemini_api_key: Optional[str] = None
 
 
 class RenderRequest(BaseModel):
@@ -201,14 +202,83 @@ def analyze_full_video_hikes(
     return smoothed
 
 
+def ai_rank_stream_moments(
+    all_subs: List[Dict[str, Any]],
+    candidates: List[Dict[str, Any]],
+    duration: float,
+    api_key: str,
+) -> Optional[List[Dict[str, Any]]]:
+    """Optional Gemini AI highlight selector using transcript + audio/motion peaks across the full stream."""
+    if not api_key or not candidates:
+        return None
+    try:
+        import requests
+        transcript_sample = "
+".join(
+            f"[{int(s['start']//60)}:{int(s['start']%60):02d}] {s['text']}"
+            for s in all_subs[::max(1, len(all_subs) // 180)][:180]
+        )
+        cand_text = "
+".join(
+            f"- t={c['peak_time']}s score={c['score']}" for c in candidates[:80]
+        )
+        prompt = (
+            f"You are a stream highlight editor. Video duration is {int(duration)}s.
+"
+            "Given candidate audio/motion/heatmap peaks and transcript lines across the full stream, "
+            "pick the best, most exciting moments from start to end (no artificial limit) and give each a short 3-6 word title.
+"
+            "Return ONLY a JSON array of objects: [{"peak_time": <number>, "title": <string>}].
+
+"
+            f"Candidate peaks:
+{cand_text}
+
+Transcript sample:
+{transcript_sample}"
+        )
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}",
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=25,
+        )
+        if resp.status_code != 200:
+            return None
+        raw_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        m = re.search(r"\[.*\]", raw_text, re.S)
+        if not m:
+            return None
+        items = json.loads(m.group(0))
+        out = []
+        for idx, it in enumerate(items, start=1):
+            peak = float(it.get("peak_time", 0))
+            if 0 <= peak <= duration:
+                start = max(0.0, peak - 20.0)
+                end = start + 30.0
+                if end > duration:
+                    end = duration
+                    start = max(0.0, end - 30.0)
+                out.append({
+                    "id": f"clip_{idx}",
+                    "title": str(it.get("title") or f"AI Highlight #{idx}"),
+                    "peak_time": round(peak, 2),
+                    "start": round(start, 2),
+                    "end": round(end, 2),
+                    "score": 0.95,
+                    "source": "ai_gemini+motion",
+                })
+        return out if len(out) >= 2 else None
+    except Exception:
+        return None
+
+
 def pick_hike_clips(
     heatmap_points: List[Dict[str, float]],
     duration: float,
     max_clips: int,
     source_type: str,
 ) -> List[Dict[str, Any]]:
-    """Pick 2 to 10 non-overlapping hike peaks and build 30s clips (20s before + 10s after)."""
-    target_count = max(2, min(10, max_clips))
+    """Pick best non-overlapping hike/movement peaks across the ENTIRE stream (0 = no limit)."""
     if duration <= 30.0:
         return [
             {
@@ -222,9 +292,11 @@ def pick_hike_clips(
             }
         ]
 
-    sorted_pts = sorted(heatmap_points, key=lambda x: x["score"], reverse=True)
-    selected_peaks: List[Dict[str, float]] = []
-    min_spacing = 28.0 if duration > target_count * 32 else max(12.0, duration / (target_count + 1))
+    # When max_clips == 0 (Auto / No Limit), scale across full stream (~1 clip every 60-90s of action, min 2)
+    if max_clips <= 0:
+        target_count = max(2, int(duration // 60))
+    else:
+        target_count = max(2, max_clips)
 
     def calc_start(peak_t: float) -> float:
         s = max(0.0, peak_t - 20.0)
@@ -232,36 +304,42 @@ def pick_hike_clips(
             s = max(0.0, duration - 30.0)
         return s
 
-    for pt in sorted_pts:
-        t = pt["t"]
-        s = calc_start(t)
-        if all(abs(t - sp["t"]) >= min_spacing and abs(s - calc_start(sp["t"])) >= 12.0 for sp in selected_peaks):
-            selected_peaks.append(pt)
-        if len(selected_peaks) >= target_count:
-            break
+    # Divide full stream into equal time windows so clips cover start -> middle -> end
+    num_windows = min(target_count, max(2, int(duration // 45)))
+    win_len = duration / num_windows
+    selected_peaks: List[Dict[str, float]] = []
 
-    # Ensure at least 2 clips if video >= 35s
-    if len(selected_peaks) < 2 and duration >= 35.0:
-        fallback_times = [duration * 0.35, duration * 0.72]
-        for ft in fallback_times:
-            if all(abs(ft - sp["t"]) >= 15.0 for sp in selected_peaks):
-                selected_peaks.append({"t": round(ft, 2), "score": 0.75})
-            if len(selected_peaks) >= 2:
+    for w in range(num_windows):
+        w_start = w * win_len
+        w_end = (w + 1) * win_len
+        win_pts = [pt for pt in heatmap_points if w_start <= pt["t"] < w_end]
+        if win_pts:
+            best_pt = max(win_pts, key=lambda x: x["score"])
+            s = calc_start(best_pt["t"])
+            if all(abs(best_pt["t"] - sp["t"]) >= 30.0 and abs(s - calc_start(sp["t"])) >= 15.0 for sp in selected_peaks):
+                selected_peaks.append(best_pt)
+
+    # Fill any remaining slots with highest overall peaks across the entire video
+    if len(selected_peaks) < target_count:
+        sorted_pts = sorted(heatmap_points, key=lambda x: x["score"], reverse=True)
+        for pt in sorted_pts:
+            t = pt["t"]
+            s = calc_start(t)
+            if all(abs(t - sp["t"]) >= 30.0 and abs(s - calc_start(sp["t"])) >= 15.0 for sp in selected_peaks):
+                selected_peaks.append(pt)
+            if len(selected_peaks) >= target_count:
                 break
 
     selected_peaks.sort(key=lambda x: x["t"])
     clips: List[Dict[str, Any]] = []
     for idx, sp in enumerate(selected_peaks, start=1):
         peak = sp["t"]
-        start = max(0.0, peak - 20.0)
-        end = start + 30.0
-        if end > duration:
-            end = duration
-            start = max(0.0, end - 30.0)
+        start = calc_start(peak)
+        end = min(duration, start + 30.0)
         clips.append(
             {
                 "id": f"clip_{idx}",
-                "title": f"Hike #{idx} ({int(peak // 60)}:{int(peak % 60):02d})",
+                "title": f"Moment #{idx} ({int(peak // 60)}:{int(peak % 60):02d})",
                 "peak_time": round(peak, 2),
                 "start": round(start, 2),
                 "end": round(end, 2),
@@ -520,6 +598,12 @@ async def analyze_link(req: AnalyzeRequest):
 
     vtt_files = list(job_dir.glob("*.vtt"))
     all_subs = parse_vtt_subtitles(vtt_files[0]) if vtt_files else []
+    ai_key = (req.gemini_api_key or "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
+    if ai_key:
+        ai_clips = ai_rank_stream_moments(all_subs, clips, duration, ai_key)
+        if ai_clips:
+            clips = ai_clips
+            source_type = "ai_gemini+motion"
     for clip in clips:
         clip["captions"] = slice_captions_for_clip(all_subs, clip["start"], clip["end"])
 
@@ -545,7 +629,7 @@ async def analyze_link(req: AnalyzeRequest):
 
 
 @app.post("/api/upload")
-async def upload_video(file: UploadFile = File(...), max_clips: int = Form(6)):
+async def upload_video(file: UploadFile = File(...), max_clips: int = Form(0)):
     if not has_tool("ffmpeg"):
         raise HTTPException(status_code=500, detail="ffmpeg is not installed on the server.")
     job_id = uuid.uuid4().hex[:10]
@@ -607,14 +691,22 @@ async def render_clip(req: RenderRequest):
 
     filter_parts: List[str] = []
     if req.facecam_enabled:
-        top_h = int(round(target_h * 0.35 / 2.0)) * 2
-        bot_h = target_h - top_h
+        info = job.get("info", {})
+        src_w = float(info.get("width", 1920) or 1920)
+        src_h = float(info.get("height", 1080) or 1080)
         fc = req.facecam_box
         mn = req.main_box
+        fc_px_w = max(1.0, fc.w * src_w)
+        fc_px_h = max(1.0, fc.h * src_h)
+        ideal_top_h = target_w * (fc_px_h / fc_px_w)
+        min_top_h = target_h * 0.22
+        max_top_h = target_h * 0.48
+        top_h = int(round(max(min_top_h, min(max_top_h, ideal_top_h)) / 2.0)) * 2
+        bot_h = target_h - top_h
         filter_parts.append(
             f"[0:v]crop=iw*{fc.w:.4f}:ih*{fc.h:.4f}:iw*{fc.x:.4f}:ih*{fc.y:.4f},"
-            f"scale={target_w}:{top_h}:force_original_aspect_ratio=increase,"
-            f"crop={target_w}:{top_h},setsar=1[top]"
+            f"scale={target_w}:{top_h}:force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{top_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[top]"
         )
         filter_parts.append(
             f"[0:v]crop=iw*{mn.w:.4f}:ih*{mn.h:.4f}:iw*{mn.x:.4f}:ih*{mn.y:.4f},"
