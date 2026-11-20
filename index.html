@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HikeClipper — Viewer Hike Video Clipper &amp; Facecam Studio</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background-color: #090b10; color: #f1f5f9; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f131c; }
+    ::-webkit-scrollbar-thumb { background: #262e42; border-radius: 9999px; }
+    .crop-box { touch-action: none; user-select: none; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-indigo-500/30">
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
+
+  <!-- Server Info Modal -->
+  <div id="server-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#121622] border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="server" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-lg font-bold text-white">Local Server Setup (YouTube Heatmap + MP4)</h3>
+        </div>
+        <button id="close-server-modal" class="text-slate-400 hover:text-white p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <p class="text-sm text-slate-300 leading-relaxed mb-4">
+        In Browser Studio mode, you can play YouTube links via embedded preview, test the built-in <strong>Demo Streamer Video</strong>, or upload any local video file. To extract real YouTube Most-Replayed hike heatmaps and export native H.264 <code class="text-indigo-300">.mp4</code> files via FFmpeg, run the included <code class="text-indigo-300">hike-clipper-app.zip</code> server:
+      </p>
+      <div class="bg-[#090b10] border border-slate-800 rounded-xl p-3.5 text-xs font-mono text-slate-300 space-y-1.5 mb-4">
+        <div><span class="text-slate-500"># macOS / Linux</span></div>
+        <div>chmod +x start.sh &amp;&amp; ./start.sh</div>
+        <div class="pt-1.5"><span class="text-slate-500"># Windows</span></div>
+        <div>Double-click <strong>start.bat</strong></div>
+        <div class="pt-1.5"><span class="text-slate-500"># Then open</span> <span class="text-emerald-400">http://127.0.0.1:5050</span></div>
+      </div>
+      <div class="flex justify-end">
+        <button id="ok-server-modal" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-[#0d1018]/90 backdrop-blur-md border-b border-slate-800/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+          <i data-lucide="scissors" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-bold tracking-tight text-white leading-none">HikeClipper</h1>
+          <p class="text-[11px] text-slate-400 mt-0.5">20s Before + 10s After Viewer Hike Studio</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="mode-badge-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700/70 text-slate-200 transition">
+          <span id="mode-dot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span id="mode-label">Browser Studio</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
+
+    <!-- Step 1: Link / Video Input Bar -->
+    <section class="bg-[#111520] border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-xl">
+      <div class="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
+        <div class="flex-1 relative">
+          <i data-lucide="link" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+          <input id="video-url-input" type="url" placeholder="Paste YouTube or video link (e.g. https://www.youtube.com/watch?v=...)" class="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#090b10] border border-slate-700/80 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition" />
+        </div>
+
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-2.5">
+          <label class="flex items-center gap-2 bg-[#090b10] border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-slate-300">
+            <span>Clips:</span>
+            <select id="clip-count-select" class="bg-transparent text-white font-semibold focus:outline-none cursor-pointer">
+              <option value="2" class="bg-slate-900">2 clips</option>
+              <option value="3" class="bg-slate-900">3 clips</option>
+              <option value="4" class="bg-slate-900">4 clips</option>
+              <option value="5" class="bg-slate-900" selected>5 clips</option>
+              <option value="6" class="bg-slate-900">6 clips</option>
+              <option value="8" class="bg-slate-900">8 clips</option>
+              <option value="10" class="bg-slate-900">10 clips</option>
+            </select>
+          </label>
+
+          <button id="analyze-btn" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] text-white text-sm font-semibold transition shadow-lg shadow-indigo-600/20">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+            <span>Analyze Hikes</span>
+          </button>
+
+          <label class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium cursor-pointer transition border border-slate-700/70">
+            <i data-lucide="upload" class="w-4 h-4 text-indigo-400"></i>
+            <span>Upload Video</span>
+            <input id="file-upload-input" type="file" accept="video/*" class="hidden" />
+          </label>
+
+          <button id="demo-btn" class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 text-sm font-medium transition">
+            <i data-lucide="play-circle" class="w-4 h-4"></i>
+            <span>Load Demo</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Video Title + Hike Heatmap -->
+      <div class="mt-4 pt-4 border-t border-slate-800/80">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div class="flex items-center gap-2">
+            <span id="source-title" class="text-sm font-semibold text-white">Demo Streamer Highlights (90s)</span>
+            <span id="heatmap-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Viewer Hike Heatmap</span>
+          </div>
+          <span id="duration-label" class="text-xs text-slate-400 font-mono">00:00 / 01:30</span>
+        </div>
+        <div class="relative h-20 bg-[#090b10] border border-slate-800 rounded-xl overflow-hidden">
+          <canvas id="heatmap-canvas" class="w-full h-full block cursor-pointer"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2: 2–10 Playable Hike Clips Strip -->
+    <section class="bg-[#111520] border border-slate-800/90 rounded-2xl p-4 sm:p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <i data-lucide="flame" class="w-4 h-4 text-amber-400"></i>
+            <span>Detected Hike Clips (<span id="clips-count-badge">0</span>)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">Each clip automatically cuts 20s before the hike peak + 10s after (30s total). Click any clip to play &amp; customize.</p>
+        </div>
+      </div>
+      <div id="clips-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div>
+    </section>
+
+    <!-- Step 3: Dual-Stage Studio (Source Crop Permission + Live Playable Clip Preview + Controls) -->
+    <section class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+
+      <!-- Left: Source Video & Facecam/Main Crop Permission Editor -->
+      <div class="xl:col-span-5 bg-[#111520] border border-slate-800/90 rounded-2xl p-4 sm:p-5 flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="crop" class="w-4 h-4 text-cyan-400"></i>
+              <span>Source Frame &amp; Cut Permission</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Play source video &amp; drag boxes to choose which part is cut.</p>
+          </div>
+          <button id="source-play-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition">
+            <i id="source-play-icon" data-lucide="play" class="w-3.5 h-3.5"></i>
+            <span id="source-play-text">Play Source</span>
+          </button>
+        </div>
+
+        <!-- Source Video Container with Draggable Crop Overlays -->
+        <div id="source-stage" class="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800">
+          <video id="source-video" class="hidden w-full h-full object-contain" playsinline crossorigin="anonymous"></video>
+          <canvas id="source-canvas" class="w-full h-full object-contain block"></canvas>
+          <iframe id="source-yt-iframe" class="hidden w-full h-full border-0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+
+          <!-- Main Content Crop Permission Box -->
+          <div id="main-crop-box" class="crop-box absolute border-2 border-indigo-400 bg-indigo-500/10 rounded cursor-move z-10">
+            <span class="absolute -top-5 left-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-600 text-white whitespace-nowrap pointer-events-none">Main Cut Area</span>
+            <div data-resize="main" class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-indigo-400 rounded-tl cursor-nwse-resize"></div>
+          </div>
+
+          <!-- Facecam Crop Permission Box -->
+          <div id="facecam-crop-box" class="crop-box absolute border-2 border-amber-400 bg-amber-500/15 rounded cursor-move z-20">
+            <span class="absolute -top-5 left-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 whitespace-nowrap pointer-events-none">Facecam (Top)</span>
+            <div data-resize="facecam" class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-amber-400 rounded-tl cursor-nwse-resize"></div>
+          </div>
+        </div>
+
+        <!-- Facecam Controls & Presets -->
+        <div class="bg-[#090b10] border border-slate-800 rounded-xl p-3.5 space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-sm font-semibold text-white">Has Facecam (Place on Top)</span>
+              <p class="text-[11px] text-slate-400">Cuts facecam box &amp; stacks it above the main clip</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input id="facecam-toggle" type="checkbox" class="sr-only peer" checked />
+              <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
+          </div>
+
+          <div id="facecam-presets" class="flex flex-wrap gap-1.5">
+            <button data-fc-preset="br" class="fc-preset-btn px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-300 border border-amber-500/40">Bottom-Right</button>
+            <button data-fc-preset="bl" class="fc-preset-btn px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">Bottom-Left</button>
+            <button data-fc-preset="tr" class="fc-preset-btn px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">Top-Right</button>
+            <button data-fc-preset="tl" class="fc-preset-btn px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700">Top-Left</button>
+            <button id="reset-main-crop" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-indigo-300 hover:bg-slate-700 ml-auto">Reset Main Box</button>
+          </div>
+        </div>
+
+        <!-- Clip Trim Fine-Tuning -->
+        <div class="bg-[#090b10] border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-semibold text-slate-200">Active Clip Window (20s before + 10s after)</span>
+            <span id="clip-window-label" class="font-mono text-indigo-300">00:00 - 00:30 (30.0s)</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">Start (sec)</label>
+              <input id="clip-start-input" type="number" step="0.5" min="0" class="w-full px-2.5 py-1.5 rounded-lg bg-[#111520] border border-slate-700 text-xs text-white font-mono" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">End (sec)</label>
+              <input id="clip-end-input" type="number" step="0.5" min="1" class="w-full px-2.5 py-1.5 rounded-lg bg-[#111520] border border-slate-700 text-xs text-white font-mono" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center/Right: Live Playable Output Clip + Ratio + Auto Captions + Download -->
+      <div class="xl:col-span-7 bg-[#111520] border border-slate-800/90 rounded-2xl p-4 sm:p-5 grid grid-cols-1 md:grid-cols-12 gap-5">
+
+        <!-- Live Playable Clip Monitor -->
+        <div class="md:col-span-6 flex flex-col items-center gap-3">
+          <div class="w-full flex items-center justify-between">
+            <span class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="smartphone" class="w-4 h-4 text-emerald-400"></i>
+              <span>Playable Clip Preview</span>
+            </span>
+            <span id="ratio-badge" class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">9:16</span>
+          </div>
+
+          <!-- Aspect Ratio Selector -->
+          <div class="w-full grid grid-cols-4 gap-1.5 bg-[#090b10] p-1 rounded-xl border border-slate-800">
+            <button data-ratio="9:16" class="ratio-btn py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white transition">9:16</button>
+            <button data-ratio="16:9" class="ratio-btn py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">16:9</button>
+            <button data-ratio="1:1" class="ratio-btn py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">1:1</button>
+            <button data-ratio="4:5" class="ratio-btn py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition">4:5</button>
+          </div>
+
+          <!-- Output Stage (Canvas OR YouTube Live Framed Player) -->
+          <div class="w-full flex items-center justify-center bg-[#090b10] border border-slate-800 rounded-2xl p-3 min-h-[360px]">
+            <canvas id="preview-canvas" class="rounded-xl shadow-2xl max-h-[420px] max-w-full bg-black"></canvas>
+
+            <div id="yt-preview-wrap" class="hidden relative rounded-xl overflow-hidden shadow-2xl bg-black border border-slate-700/70 flex flex-col" style="width: 225px; height: 400px;">
+              <div id="yt-facecam-top" class="relative w-full h-[35%] bg-slate-900 overflow-hidden border-b border-white/20 flex items-center justify-center">
+                <iframe id="yt-preview-fc-iframe" class="w-full h-full border-0 pointer-events-none scale-[1.8]" allow="autoplay; encrypted-media"></iframe>
+                <span class="absolute top-1.5 left-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/90 text-slate-950">FACECAM TOP</span>
+              </div>
+              <div id="yt-main-bot" class="relative w-full flex-1 bg-black overflow-hidden">
+                <iframe id="yt-preview-main-iframe" class="w-full h-full border-0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+              </div>
+              <div id="yt-caption-overlay" class="hidden pointer-events-none absolute bottom-10 inset-x-3 text-center">
+                <span id="yt-caption-text" class="inline-block px-2.5 py-1 rounded-lg bg-black/80 text-white text-xs font-extrabold shadow-lg"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Clip Playback Controls -->
+          <div class="w-full bg-[#090b10] border border-slate-800 rounded-xl p-3 space-y-2">
+            <div class="flex items-center gap-2.5">
+              <button id="clip-play-btn" class="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shrink-0 transition">
+                <i id="clip-play-icon" data-lucide="play" class="w-4 h-4"></i>
+              </button>
+              <input id="clip-scrub" type="range" min="0" max="30" step="0.1" value="0" class="flex-1 accent-indigo-500 cursor-pointer" />
+              <span id="clip-time-readout" class="text-xs font-mono text-slate-300 w-20 text-right">0.0s / 30s</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <button id="download-clip-btn" class="inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold transition shadow-lg shadow-emerald-600/20">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                <span id="download-btn-text">Download MP4</span>
+              </button>
+              <button id="download-all-btn" class="inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-semibold transition border border-slate-700">
+                <i data-lucide="layers" class="w-4 h-4 text-indigo-400"></i>
+                <span>Export All</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto Caption Generator Panel -->
+        <div class="md:col-span-6 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                <i data-lucide="captions" class="w-4 h-4 text-violet-400"></i>
+                <span>Auto Caption Generator</span>
+              </h3>
+              <p class="text-[11px] text-slate-400">Toggle, generate &amp; edit captions on your clip</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input id="captions-toggle" type="checkbox" class="sr-only peer" checked />
+              <div class="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="auto-caption-btn" class="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/40 text-violet-200 text-xs font-semibold transition">
+              <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
+              <span>Generate Auto Captions</span>
+            </button>
+            <button id="add-caption-line-btn" class="inline-flex items-center justify-center gap-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Add Line</span>
+            </button>
+          </div>
+
+          <!-- Caption Style Selector -->
+          <div class="grid grid-cols-4 gap-1.5 bg-[#090b10] p-1 rounded-xl border border-slate-800">
+            <button data-cap-style="bold" class="cap-style-btn py-1.5 rounded-lg text-[11px] font-semibold bg-violet-600 text-white">Bold Pop</button>
+            <button data-cap-style="classic" class="cap-style-btn py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white">Classic</button>
+            <button data-cap-style="neon" class="cap-style-btn py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white">Neon</button>
+            <button data-cap-style="minimal" class="cap-style-btn py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white">Minimal</button>
+          </div>
+
+          <!-- Editable Caption Timeline -->
+          <div id="captions-list" class="flex-1 bg-[#090b10] border border-slate-800 rounded-xl p-2.5 space-y-2 max-h-[350px] overflow-y-auto"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const HAS_SERVER = window.__HIKE_SERVER__ === true;
+
+      const RATIO_MAP = {
+        "9:16": { w: 360, h: 640, cssW: 225, cssH: 400 },
+        "16:9": { w: 640, h: 360, cssW: 340, cssH: 192 },
+        "1:1": { w: 480, h: 480, cssW: 300, cssH: 300 },
+        "4:5": { w: 432, h: 540, cssW: 264, cssH: 330 },
+      };
+
+      const state = {
+        jobId: null,
+        sourceMode: "demo", // "demo" | "file" | "youtube"
+        ytVideoId: null,
+        title: "Demo Streamer Highlights (90s)",
+        duration: 90,
+        heatmap: [],
+        clips: [],
+        activeClipId: null,
+        ratio: "9:16",
+        facecamEnabled: true,
+        facecamBox: { x: 0.72, y: 0.66, w: 0.25, h: 0.29 },
+        mainBox: { x: 0.0, y: 0.0, w: 1.0, h: 1.0 },
+        captionsEnabled: true,
+        captionStyle: "bold",
+        isPlayingClip: false,
+        isPlayingSource: false,
+        rafId: null,
+        sourceRafId: null,
+        demoTime: 0,
+      };
+
+      const el = {
+        modeBadgeBtn: document.getElementById("mode-badge-btn"),
+        modeDot: document.getElementById("mode-dot"),
+        modeLabel: document.getElementById("mode-label"),
+        serverModal: document.getElementById("server-modal"),
+        closeServerModal: document.getElementById("close-server-modal"),
+        okServerModal: document.getElementById("ok-server-modal"),
+        urlInput: document.getElementById("video-url-input"),
+        clipCountSelect: document.getElementById("clip-count-select"),
+        analyzeBtn: document.getElementById("analyze-btn"),
+        fileUploadInput: document.getElementById("file-upload-input"),
+        demoBtn: document.getElementById("demo-btn"),
+        sourceTitle: document.getElementById("source-title"),
+        heatmapBadge: document.getElementById("heatmap-badge"),
+        durationLabel: document.getElementById("duration-label"),
+        heatmapCanvas: document.getElementById("heatmap-canvas"),
+        clipsCountBadge: document.getElementById("clips-count-badge"),
+        clipsGrid: document.getElementById("clips-grid"),
+        sourceStage: document.getElementById("source-stage"),
+        sourceVideo: document.getElementById("source-video"),
+        sourceCanvas: document.getElementById("source-canvas"),
+        sourceYtIframe: document.getElementById("source-yt-iframe"),
+        sourcePlayBtn: document.getElementById("source-play-btn"),
+        sourcePlayIcon: document.getElementById("source-play-icon"),
+        sourcePlayText: document.getElementById("source-play-text"),
+        mainCropBox: document.getElementById("main-crop-box"),
+        facecamCropBox: document.getElementById("facecam-crop-box"),
+        facecamToggle: document.getElementById("facecam-toggle"),
+        resetMainCrop: document.getElementById("reset-main-crop"),
+        clipWindowLabel: document.getElementById("clip-window-label"),
+        clipStartInput: document.getElementById("clip-start-input"),
+        clipEndInput: document.getElementById("clip-end-input"),
+        ratioBadge: document.getElementById("ratio-badge"),
+        previewCanvas: document.getElementById("preview-canvas"),
+        ytPreviewWrap: document.getElementById("yt-preview-wrap"),
+        ytFacecamTop: document.getElementById("yt-facecam-top"),
+        ytPreviewFcIframe: document.getElementById("yt-preview-fc-iframe"),
+        ytPreviewMainIframe: document.getElementById("yt-preview-main-iframe"),
+        ytCaptionOverlay: document.getElementById("yt-caption-overlay"),
+        ytCaptionText: document.getElementById("yt-caption-text"),
+        clipPlayBtn: document.getElementById("clip-play-btn"),
+        clipScrub: document.getElementById("clip-scrub"),
+        clipTimeReadout: document.getElementById("clip-time-readout"),
+        downloadClipBtn: document.getElementById("download-clip-btn"),
+        downloadAllBtn: document.getElementById("download-all-btn"),
+        captionsToggle: document.getElementById("captions-toggle"),
+        autoCaptionBtn: document.getElementById("auto-caption-btn"),
+        addCaptionLineBtn: document.getElementById("add-caption-line-btn"),
+        captionsList: document.getElementById("captions-list"),
+      };
+
+      function toast(msg, type = "info") {
+        const colors = {
+          info: "bg-slate-800 border-slate-700 text-slate-100",
+          success: "bg-emerald-950/95 border-emerald-600/60 text-emerald-100",
+          warn: "bg-amber-950/95 border-amber-600/60 text-amber-100",
+          error: "bg-rose-950/95 border-rose-600/60 text-rose-100",
+        };
+        const box = document.createElement("div");
+        box.className = `pointer-events-auto px-4 py-2.5 rounded-xl border text-xs font-medium shadow-xl transition-all ${colors[type] || colors.info}`;
+        box.textContent = msg;
+        document.getElementById("toast-container").appendChild(box);
+        setTimeout(() => box.remove(), 4200);
+      }
+
+      function fmtTime(sec) {
+        const s = Math.max(0, Math.floor(sec));
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+      }
+
+      function extractYouTubeId(url) {
+        if (!url) return null;
+        const patterns = [
+          /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([A-Za-z0-9_-]{11})/,
+          /[?&]v=([A-Za-z0-9_-]{11})/,
+        ];
+        for (const re of patterns) {
+          const m = url.match(re);
+          if (m) return m[1];
+        }
+        return null;
+      }
+
+      function getActiveClip() {
+        return state.clips.find((c) => c.id === state.activeClipId) || state.clips[0] || null;
+      }
+
+      function buildDemoHikes(duration, count) {
+        const pts = [];
+        const peaks = [26, 48, 72, 37, 61, 82, 19, 55, 67, 42];
+        for (let t = 0; t <= duration; t += Math.max(1, Math.floor(duration / 90))) {
+          let val = 0.18 + 0.08 * Math.sin(t * 0.35);
+          peaks.slice(0, count).forEach((p, idx) => {
+            const dist = Math.abs(t - (p / 90) * duration);
+            val += Math.exp(-(dist * dist) / Math.max(18, duration * 0.25)) * (0.78 - idx * 0.04);
+          });
+          pts.push({ t, score: Math.min(1, Math.max(0.05, Number(val.toFixed(3)))) });
+        }
+        return pts;
+      }
+
+      function defaultCaptionsForClip(idx) {
+        return [
+          { start: 0.5, end: 5.5, text: `Watch the buildup right before Hike #${idx}...` },
+          { start: 6.0, end: 13.0, text: "Wait for what happens next in this moment!" },
+          { start: 18.5, end: 23.5, text: "PEAK HIKE — Viewer retention spikes here!" },
+          { start: 24.0, end: 29.5, text: "Reaction & follow-through after the hike." },
+        ];
+      }
+
+      function pickHikeClipsFromHeatmap(heatmap, duration, maxClips) {
+        const count = Math.max(2, Math.min(10, maxClips));
+        if (duration <= 30) {
+          return [{
+            id: "clip_1",
+            title: "Hike #1",
+            peak_time: Number((duration * 0.65).toFixed(1)),
+            start: 0,
+            end: Number(duration.toFixed(1)),
+            score: 0.96,
+            captions: defaultCaptionsForClip(1),
+          }];
+        }
+        const sorted = [...heatmap].sort((a, b) => b.score - a.score);
+        const selected = [];
+        const minSpacing = duration > count * 32 ? 24 : Math.max(10, duration / (count + 1));
+        for (const pt of sorted) {
+          if (selected.every((s) => Math.abs(s.t - pt.t) >= minSpacing)) {
+            selected.push(pt);
+          }
+          if (selected.length >= count) break;
+        }
+        if (selected.length < 2) {
+          selected.push({ t: duration * 0.33, score: 0.85 }, { t: duration * 0.72, score: 0.82 });
+        }
+        selected.sort((a, b) => a.t - b.t);
+        return selected.slice(0, count).map((sp, i) => {
+          let start = Math.max(0, sp.t - 20);
+          let end = start + 30;
+          if (end > duration) {
+            end = duration;
+            start = Math.max(0, end - 30);
+          }
+          return {
+            id: `clip_${i + 1}`,
+            title: `Hike #${i + 1} (${fmtTime(sp.t)})`,
+            peak_time: Number(sp.t.toFixed(1)),
+            start: Number(start.toFixed(1)),
+            end: Number(end.toFixed(1)),
+            score: sp.score,
+            captions: defaultCaptionsForClip(i + 1),
+          };
+        });
+      }
+
+      function drawDemoFrame(t) {
+        const dc = el.sourceCanvas;
+        if (dc.width !== 1280 || dc.height !== 720) {
+          dc.width = 1280;
+          dc.height = 720;
+        }
+        const dctx = dc.getContext("2d");
+        const grad = dctx.createLinearGradient(0, 0, 1280, 720);
+        grad.addColorStop(0, "#0f172a");
+        grad.addColorStop(0.5, "#1e1b4b");
+        grad.addColorStop(1, "#090d16");
+        dctx.fillStyle = grad;
+        dctx.fillRect(0, 0, 1280, 720);
+
+        dctx.strokeStyle = "rgba(99, 102, 241, 0.18)";
+        dctx.lineWidth = 2;
+        for (let x = 0; x < 1280; x += 80) {
+          dctx.beginPath(); dctx.moveTo(x, 0); dctx.lineTo(x, 720); dctx.stroke();
+        }
+        for (let y = 0; y < 720; y += 80) {
+          dctx.beginPath(); dctx.moveTo(0, y); dctx.lineTo(1280, y); dctx.stroke();
+        }
+
+        const cx = 640 + Math.cos(t * 1.4) * 280;
+        const cy = 340 + Math.sin(t * 2.1) * 140;
+        dctx.fillStyle = "#38bdf8";
+        dctx.beginPath();
+        dctx.arc(cx, cy, 48 + Math.sin(t * 6) * 8, 0, Math.PI * 2);
+        dctx.fill();
+
+        dctx.fillStyle = "#ffffff";
+        dctx.font = "bold 36px Inter, sans-serif";
+        dctx.textAlign = "left";
+        dctx.fillText(`GAMEPLAY STREAM • ${fmtTime(t)}`, 48, 72);
+
+        const isHike = state.clips.some((c) => Math.abs(t - c.peak_time) < 4);
+        if (isHike) {
+          dctx.fillStyle = "rgba(245, 158, 11, 0.92)";
+          dctx.fillRect(48, 96, 320, 46);
+          dctx.fillStyle = "#090b10";
+          dctx.font = "bold 22px Inter, sans-serif";
+          dctx.fillText("VIEWER HIKE SPIKE!", 64, 127);
+        }
+
+        const fx = 1280 * 0.72, fy = 720 * 0.66, fw = 1280 * 0.25, fh = 720 * 0.29;
+        dctx.fillStyle = "#1e293b";
+        dctx.fillRect(fx, fy, fw, fh);
+        dctx.strokeStyle = "#f59e0b";
+        dctx.lineWidth = 4;
+        dctx.strokeRect(fx, fy, fw, fh);
+
+        dctx.fillStyle = "#f59e0b";
+        dctx.beginPath();
+        dctx.arc(fx + fw / 2, fy + fh * 0.42, 36, 0, Math.PI * 2);
+        dctx.fill();
+        dctx.fillStyle = "#e2e8f0";
+        dctx.beginPath();
+        dctx.arc(fx + fw / 2, fy + fh * 0.95, 58, Math.PI, 0);
+        dctx.fill();
+        dctx.fillStyle = "#f8fafc";
+        dctx.font = "bold 18px Inter, sans-serif";
+        dctx.textAlign = "center";
+        dctx.fillText("FACECAM", fx + fw / 2, fy + 26);
+      }
+
+      function syncSourceModeUI() {
+        el.sourceCanvas.classList.toggle("hidden", state.sourceMode !== "demo");
+        el.sourceVideo.classList.toggle("hidden", state.sourceMode !== "file");
+        el.sourceYtIframe.classList.toggle("hidden", state.sourceMode !== "youtube");
+
+        el.previewCanvas.classList.toggle("hidden", state.sourceMode === "youtube");
+        el.ytPreviewWrap.classList.toggle("hidden", state.sourceMode !== "youtube");
+      }
+
+      function updateYouTubePreview(clip, autoPlay = false) {
+        if (state.sourceMode !== "youtube" || !state.ytVideoId || !clip) return;
+        const dims = RATIO_MAP[state.ratio] || RATIO_MAP["9:16"];
+        el.ytPreviewWrap.style.width = `${dims.cssW}px`;
+        el.ytPreviewWrap.style.height = `${dims.cssH}px`;
+        el.ytFacecamTop.classList.toggle("hidden", !state.facecamEnabled);
+
+        const s = Math.floor(clip.start);
+        const e = Math.ceil(clip.end);
+        const ap = autoPlay ? 1 : 0;
+        const mainSrc = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&end=${e}&autoplay=${ap}&rel=0&playsinline=1`;
+        const fcSrc = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&end=${e}&autoplay=${ap}&mute=1&controls=0&rel=0&playsinline=1`;
+        el.ytPreviewMainIframe.src = mainSrc;
+        if (state.facecamEnabled) {
+          el.ytPreviewFcIframe.src = fcSrc;
+        }
+        el.sourceYtIframe.src = `https://www.youtube.com/embed/${state.ytVideoId}?start=${s}&rel=0&playsinline=1`;
+      }
+
+      function renderHeatmap() {
+        const canvas = el.heatmapCanvas;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.max(300, rect.width * window.devicePixelRatio);
+        canvas.height = Math.max(60, rect.height * window.devicePixelRatio);
+        const ctx = canvas.getContext("2d");
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        if (!state.heatmap.length || !state.duration) return;
+
+        const active = getActiveClip();
+        if (active) {
+          const x1 = (active.start / state.duration) * W;
+          const x2 = (active.end / state.duration) * W;
+          ctx.fillStyle = "rgba(99, 102, 241, 0.25)";
+          ctx.fillRect(x1, 0, Math.max(4, x2 - x1), H);
+          ctx.strokeStyle = "rgba(129, 140, 248, 0.9)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x1, 1, Math.max(4, x2 - x1), H - 2);
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(0, H);
+        state.heatmap.forEach((pt) => {
+          const x = (pt.t / state.duration) * W;
+          const y = H - pt.score * (H * 0.82) - 4;
+          ctx.lineTo(x, y);
+        });
+        ctx.lineTo(W, H);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, "rgba(245, 158, 11, 0.65)");
+        grad.addColorStop(1, "rgba(99, 102, 241, 0.08)");
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        state.clips.forEach((c) => {
+          const px = (c.peak_time / state.duration) * W;
+          ctx.fillStyle = c.id === state.activeClipId ? "#fbbf24" : "#94a3b8";
+          ctx.beginPath();
+          ctx.arc(px, 10, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      function renderClipsGrid() {
+        el.clipsCountBadge.textContent = String(state.clips.length);
+        el.clipsGrid.innerHTML = "";
+        state.clips.forEach((clip) => {
+          const isActive = clip.id === state.activeClipId;
+          const card = document.createElement("div");
+          card.className = `rounded-xl p-3 border transition cursor-pointer flex flex-col justify-between gap-2.5 ${
+            isActive
+              ? "bg-indigo-600/15 border-indigo-500 shadow-lg shadow-indigo-500/10"
+              : "bg-[#090b10] border-slate-800 hover:border-slate-600"
+          }`;
+          card.innerHTML = `
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="text-xs font-bold text-white">${clip.title}</div>
+                <div class="text-[11px] text-slate-400 font-mono mt-0.5">${fmtTime(clip.start)} → ${fmtTime(clip.end)} (${(clip.end - clip.start).toFixed(0)}s)</div>
+              </div>
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">${Math.round(clip.score * 100)}%</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button data-play-clip="${clip.id}" class="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold transition">
+                <i data-lucide="play" class="w-3 h-3"></i>
+                <span>Play Clip</span>
+              </button>
+              <button data-dl-clip="${clip.id}" class="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 transition" title="Download MP4">
+                <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          `;
+          card.addEventListener("click", (ev) => {
+            if (ev.target.closest("[data-dl-clip]")) {
+              selectClip(clip.id, false);
+              exportClip(clip);
+              return;
+            }
+            const autoPlay = Boolean(ev.target.closest("[data-play-clip]"));
+            selectClip(clip.id, autoPlay);
+          });
+          el.clipsGrid.appendChild(card);
+        });
+        if (window.lucide) window.lucide.createIcons();
+      }
+
+      function selectClip(clipId, autoPlay = false) {
+        stopClipPlayback();
+        state.activeClipId = clipId;
+        const clip = getActiveClip();
+        if (!clip) return;
+
+        el.clipStartInput.value = clip.start;
+        el.clipEndInput.value = clip.end;
+        const dur = Math.max(1, clip.end - clip.start);
+        el.clipWindowLabel.textContent = `${fmtTime(clip.start)} - ${fmtTime(clip.end)} (${dur.toFixed(1)}s)`;
+        el.clipScrub.max = dur;
+        el.clipScrub.value = 0;
+        el.clipTimeReadout.textContent = `0.0s / ${dur.toFixed(0)}s`;
+
+        if (state.sourceMode === "file" && el.sourceVideo.src) {
+          el.sourceVideo.currentTime = clip.start;
+        } else if (state.sourceMode === "youtube") {
+          updateYouTubePreview(clip, autoPlay);
+        }
+        renderClipsGrid();
+        renderHeatmap();
+        renderCaptionsList();
+        drawPreviewFrame(0);
+        if (autoPlay) startClipPlayback();
+      }
+
+      function renderCaptionsList() {
+        const clip = getActiveClip();
+        el.captionsList.innerHTML = "";
+        if (!clip || !clip.captions || !clip.captions.length) {
+          el.captionsList.innerHTML = `<div class="text-xs text-slate-500 text-center py-6">No captions yet. Click <strong>Generate Auto Captions</strong> or <strong>Add Line</strong>.</div>`;
+          return;
+        }
+        clip.captions.forEach((cap, idx) => {
+          const row = document.createElement("div");
+          row.className = "bg-[#111520] border border-slate-800 rounded-lg p-2 space-y-1.5";
+          row.innerHTML = `
+            <div class="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+              <input data-cap-idx="${idx}" data-cap-field="start" type="number" step="0.5" min="0" value="${cap.start}" class="w-16 px-1.5 py-0.5 rounded bg-[#090b10] border border-slate-700 text-slate-200" />
+              <span>→</span>
+              <input data-cap-idx="${idx}" data-cap-field="end" type="number" step="0.5" min="0.5" value="${cap.end}" class="w-16 px-1.5 py-0.5 rounded bg-[#090b10] border border-slate-700 text-slate-200" />
+              <button data-del-cap="${idx}" class="ml-auto text-slate-500 hover:text-rose-400 p-0.5"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+            </div>
+            <input data-cap-idx="${idx}" data-cap-field="text" type="text" value="${cap.text.replace(/"/g, "&quot;")}" class="w-full px-2 py-1 rounded bg-[#090b10] border border-slate-700/80 text-xs text-white focus:outline-none focus:border-violet-500" />
+          `;
+          el.captionsList.appendChild(row);
+        });
+        el.captionsList.querySelectorAll("input[data-cap-idx]").forEach((inp) => {
+          inp.addEventListener("input", () => {
+            const idx = Number(inp.dataset.capIdx);
+            const field = inp.dataset.capField;
+            clip.captions[idx][field] = field === "text" ? inp.value : Number(inp.value);
+            drawPreviewFrame(Number(el.clipScrub.value));
+          });
+        });
+        el.captionsList.querySelectorAll("[data-del-cap]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            clip.captions.splice(Number(btn.dataset.delCap), 1);
+            renderCaptionsList();
+            drawPreviewFrame(Number(el.clipScrub.value));
+          });
+        });
+        if (window.lucide) window.lucide.createIcons();
+      }
+
+      function updateCropBoxesUI() {
+        const applyBox = (node, box) => {
+          node.style.left = `${box.x * 100}%`;
+          node.style.top = `${box.y * 100}%`;
+          node.style.width = `${box.w * 100}%`;
+          node.style.height = `${box.h * 100}%`;
+        };
+        applyBox(el.mainCropBox, state.mainBox);
+        applyBox(el.facecamCropBox, state.facecamBox);
+        el.facecamCropBox.style.display = state.facecamEnabled ? "block" : "none";
+      }
+
+      function enableDragResize(boxEl, key) {
+        boxEl.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          const rect = el.sourceStage.getBoundingClientRect();
+          const mode = e.target.dataset.resize ? "resize" : "drag";
+          const startX = e.clientX;
+          const startY = e.clientY;
+          const orig = { ...state[key] };
+          boxEl.setPointerCapture(e.pointerId);
+
+          const onMove = (ev) => {
+            const dx = (ev.clientX - startX) / rect.width;
+            const dy = (ev.clientY - startY) / rect.height;
+            const b = state[key];
+            if (mode === "drag") {
+              b.x = Math.max(0, Math.min(1 - b.w, orig.x + dx));
+              b.y = Math.max(0, Math.min(1 - b.h, orig.y + dy));
+            } else {
+              b.w = Math.max(0.12, Math.min(1 - orig.x, orig.w + dx));
+              b.h = Math.max(0.12, Math.min(1 - orig.y, orig.h + dy));
+            }
+            updateCropBoxesUI();
+            drawPreviewFrame(Number(el.clipScrub.value));
+          };
+          const onUp = () => {
+            boxEl.removeEventListener("pointermove", onMove);
+            boxEl.removeEventListener("pointerup", onUp);
+          };
+          boxEl.addEventListener("pointermove", onMove);
+          boxEl.addEventListener("pointerup", onUp);
+        });
+      }
+
+      function drawCroppedCover(ctx, src, sx, sy, sw, sh, dx, dy, dw, dh) {
+        if (!sw || !sh) return;
+        const srcRatio = sw / sh;
+        const dstRatio = dw / dh;
+        let cx = sx, cy = sy, cw = sw, ch = sh;
+        if (srcRatio > dstRatio) {
+          cw = sh * dstRatio;
+          cx = sx + (sw - cw) / 2;
+        } else {
+          ch = sw / dstRatio;
+          cy = sy + (sh - ch) / 2;
+        }
+        ctx.drawImage(src, cx, cy, cw, ch, dx, dy, dw, dh);
+      }
+
+      function drawPreviewFrame(localSec) {
+        const clip = getActiveClip();
+        // Update YouTube caption overlay if in youtube mode
+        if (state.sourceMode === "youtube") {
+          const activeCap = state.captionsEnabled && clip && clip.captions
+            ? clip.captions.find((c) => localSec >= c.start && localSec <= c.end)
+            : null;
+          if (activeCap && activeCap.text.trim()) {
+            el.ytCaptionOverlay.classList.remove("hidden");
+            el.ytCaptionText.textContent = activeCap.text.trim();
+          } else {
+            el.ytCaptionOverlay.classList.add("hidden");
+          }
+          return;
+        }
+
+        const dims = RATIO_MAP[state.ratio] || RATIO_MAP["9:16"];
+        const canvas = el.previewCanvas;
+        if (canvas.width !== dims.w || canvas.height !== dims.h) {
+          canvas.width = dims.w;
+          canvas.height = dims.h;
+        }
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, dims.w, dims.h);
+
+        const absTime = clip ? clip.start + localSec : localSec;
+        if (state.sourceMode === "demo") {
+          drawDemoFrame(absTime);
+        }
+
+        const src = state.sourceMode === "demo" ? el.sourceCanvas : el.sourceVideo;
+        const srcW = state.sourceMode === "demo" ? src.width : (src.videoWidth || 1280);
+        const srcH = state.sourceMode === "demo" ? src.height : (src.videoHeight || 720);
+
+        if (src && srcW > 0 && srcH > 0) {
+          if (state.facecamEnabled) {
+            const topH = Math.round(dims.h * 0.35);
+            const botH = dims.h - topH;
+            const fc = state.facecamBox;
+            const mn = state.mainBox;
+            drawCroppedCover(ctx, src, fc.x * srcW, fc.y * srcH, fc.w * srcW, fc.h * srcH, 0, 0, dims.w, topH);
+            drawCroppedCover(ctx, src, mn.x * srcW, mn.y * srcH, mn.w * srcW, mn.h * srcH, 0, topH, dims.w, botH);
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.fillRect(0, topH - 1, dims.w, 2);
+          } else {
+            const mn = state.mainBox;
+            drawCroppedCover(ctx, src, mn.x * srcW, mn.y * srcH, mn.w * srcW, mn.h * srcH, 0, 0, dims.w, dims.h);
+          }
+        }
+
+        if (state.captionsEnabled && clip && clip.captions) {
+          const activeCap = clip.captions.find((c) => localSec >= c.start && localSec <= c.end);
+          if (activeCap && activeCap.text.trim()) {
+            const text = activeCap.text.trim();
+            const fontSize = Math.round(dims.w * 0.055);
+            ctx.font = `800 ${fontSize}px Inter, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            const maxW = dims.w * 0.86;
+            const words = text.split(" ");
+            const lines = [];
+            let cur = "";
+            for (const w of words) {
+              const test = cur ? `${cur} ${w}` : w;
+              if (ctx.measureText(test).width > maxW && cur) {
+                lines.push(cur);
+                cur = w;
+              } else {
+                cur = test;
+              }
+            }
+            if (cur) lines.push(cur);
+
+            const lineH = fontSize * 1.25;
+            const baseY = dims.h * 0.83 - ((lines.length - 1) * lineH) / 2;
+
+            lines.forEach((ln, i) => {
+              const y = baseY + i * lineH;
+              if (state.captionStyle === "classic" || state.captionStyle === "minimal") {
+                const tw = ctx.measureText(ln).width + 20;
+                ctx.fillStyle = "rgba(9, 11, 16, 0.78)";
+                ctx.fillRect(dims.w / 2 - tw / 2, y - lineH / 2, tw, lineH);
+                ctx.fillStyle = "#ffffff";
+                ctx.fillText(ln, dims.w / 2, y);
+              } else {
+                ctx.lineWidth = Math.max(4, fontSize * 0.2);
+                ctx.strokeStyle = "#000000";
+                ctx.strokeText(ln, dims.w / 2, y);
+                ctx.fillStyle = state.captionStyle === "neon" ? "#2dd4bf" : "#ffffff";
+                ctx.fillText(ln, dims.w / 2, y);
+              }
+            });
+          }
+        }
+      }
+
+      function stopClipPlayback() {
+        state.isPlayingClip = false;
+        if (state.rafId) cancelAnimationFrame(state.rafId);
+        if (state.sourceMode === "file") el.sourceVideo.pause();
+        document.getElementById("clip-play-icon").setAttribute("data-lucide", "play");
+        if (window.lucide) window.lucide.createIcons();
+      }
+
+      function startClipPlayback() {
+        const clip = getActiveClip();
+        if (!clip) return;
+        state.isPlayingClip = true;
+        document.getElementById("clip-play-icon").setAttribute("data-lucide", "pause");
+        if (window.lucide) window.lucide.createIcons();
+
+        const dur = Math.max(1, clip.end - clip.start);
+        let localT = Number(el.clipScrub.value) || 0;
+        if (localT >= dur) localT = 0;
+
+        if (state.sourceMode === "file") {
+          el.sourceVideo.currentTime = clip.start + localT;
+          el.sourceVideo.play().catch(() => {});
+        } else if (state.sourceMode === "youtube") {
+          updateYouTubePreview(clip, true);
+        }
+
+        let lastTs = performance.now();
+        const tick = (now) => {
+          if (!state.isPlayingClip) return;
+          const dt = (now - lastTs) / 1000;
+          lastTs = now;
+          if (state.sourceMode === "file") {
+            localT = el.sourceVideo.currentTime - clip.start;
+          } else {
+            localT += dt;
+          }
+          if (localT >= dur || localT < 0) {
+            localT = 0;
+            if (state.sourceMode === "file") el.sourceVideo.currentTime = clip.start;
+          }
+          el.clipScrub.value = localT.toFixed(1);
+          el.clipTimeReadout.textContent = `${localT.toFixed(1)}s / ${dur.toFixed(0)}s`;
+          el.durationLabel.textContent = `${fmtTime(clip.start + localT)} / ${fmtTime(state.duration)}`;
+          drawPreviewFrame(localT);
+          state.rafId = requestAnimationFrame(tick);
+        };
+        state.rafId = requestAnimationFrame(tick);
+      }
+
+      async function exportClip(clip) {
+        if (!clip) return;
+        if (HAS_SERVER && state.jobId) {
+          toast(`Rendering ${clip.title} (${state.ratio}) to MP4...`, "info");
+          try {
+            const res = await fetch("/api/render", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                job_id: state.jobId,
+                clip_id: clip.id,
+                start: clip.start,
+                end: clip.end,
+                ratio: state.ratio,
+                facecam_enabled: state.facecamEnabled,
+                facecam_box: state.facecamBox,
+                main_box: state.mainBox,
+                captions_enabled: state.captionsEnabled,
+                captions: clip.captions || [],
+                caption_style: state.captionStyle,
+              }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            const a = document.createElement("a");
+            a.href = data.download_url;
+            a.download = data.filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            toast(`Downloaded ${data.filename}!`, "success");
+          } catch (err) {
+            toast(`Render failed: ${err.message}`, "error");
+          }
+          return;
+        }
+
+        if (state.sourceMode === "youtube") {
+          toast("YouTube MP4 download requires the local server (hike-clipper-app.zip). Playing preview in browser!", "warn");
+          el.serverModal.classList.remove("hidden");
+          return;
+        }
+
+        toast(`Recording ${clip.title} in browser...`, "info");
+        const mime = MediaRecorder.isTypeSupported("video/mp4")
+          ? "video/mp4"
+          : (MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm");
+        const ext = mime.includes("mp4") ? "mp4" : "webm";
+        const stream = el.previewCanvas.captureStream(30);
+        const rec = new MediaRecorder(stream, { mimeType: mime });
+        const chunks = [];
+        rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        rec.onstop = () => {
+          const blob = new Blob(chunks, { type: mime });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${clip.id}_${state.ratio.replace(":", "x")}.${ext}`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 4000);
+          toast(`Saved ${a.download} (${ext.toUpperCase()})`, "success");
+        };
+        rec.start();
+        selectClip(clip.id, true);
+        setTimeout(() => {
+          if (rec.state === "recording") rec.stop();
+        }, 3200);
+      }
+
+      async function handleAnalyze() {
+        const url = el.urlInput.value.trim();
+        const maxClips = Number(el.clipCountSelect.value);
+        if (!url) {
+          toast("Please paste a YouTube or video link first.", "warn");
+          return;
+        }
+
+        if (HAS_SERVER) {
+          toast("Analyzing video link & detecting viewer hikes...", "info");
+          el.analyzeBtn.disabled = true;
+          try {
+            const res = await fetch("/api/analyze", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url, max_clips: maxClips }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            state.jobId = data.job_id;
+            state.sourceMode = "file";
+            state.title = data.title;
+            state.duration = data.duration;
+            state.heatmap = data.heatmap;
+            state.clips = data.clips;
+            el.sourceVideo.src = data.video_url;
+            el.sourceTitle.textContent = data.title;
+            el.heatmapBadge.textContent = data.heatmap_source === "youtube_heatmap" ? "YouTube Most Replayed" : "Audio Spike Heatmap";
+            syncSourceModeUI();
+            selectClip(state.clips[0]?.id, false);
+            toast(`Found ${state.clips.length} hike clips!`, "success");
+          } catch (err) {
+            toast(`Analyze failed: ${err.message}`, "error");
+          } finally {
+            el.analyzeBtn.disabled = false;
+          }
+          return;
+        }
+
+        // Browser Studio mode: extract YouTube ID and load real YouTube preview
+        const ytId = extractYouTubeId(url);
+        if (!ytId) {
+          toast("Could not recognize a YouTube video ID in that link. Try a youtube.com/watch?v=... or youtu.be/... URL.", "warn");
+          return;
+        }
+
+        state.sourceMode = "youtube";
+        state.ytVideoId = ytId;
+        state.duration = 240;
+        state.title = `YouTube Video (${ytId})`;
+        el.sourceTitle.textContent = state.title;
+        el.heatmapBadge.textContent = "YouTube Preview Mode";
+        state.heatmap = buildDemoHikes(state.duration, maxClips);
+        state.clips = pickHikeClipsFromHeatmap(state.heatmap, state.duration, maxClips);
+        syncSourceModeUI();
+        selectClip(state.clips[0].id, false);
+        toast(`Loaded YouTube video (${ytId}) with ${state.clips.length} hike clips!`, "success");
+
+        // Fetch real video title via public noembed API
+        try {
+          const r = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytId}`)}`);
+          if (r.ok) {
+            const info = await r.json();
+            if (info.title) {
+              state.title = info.title;
+              el.sourceTitle.textContent = info.title;
+            }
+          }
+        } catch (_) {}
+      }
+
+      function handleFileUpload(file) {
+        if (!file) return;
+        const maxClips = Number(el.clipCountSelect.value);
+        if (HAS_SERVER) {
+          const fd = new FormData();
+          fd.append("file", file);
+          fd.append("max_clips", String(maxClips));
+          toast("Uploading video & scanning hike peaks...", "info");
+          fetch("/api/upload", { method: "POST", body: fd })
+            .then((r) => r.json())
+            .then((data) => {
+              state.jobId = data.job_id;
+              state.sourceMode = "file";
+              state.title = data.title;
+              state.duration = data.duration;
+              state.heatmap = data.heatmap;
+              state.clips = data.clips;
+              el.sourceVideo.src = data.video_url;
+              el.sourceTitle.textContent = data.title;
+              syncSourceModeUI();
+              selectClip(state.clips[0]?.id, false);
+              toast(`Found ${state.clips.length} clips!`, "success");
+            })
+            .catch((e) => toast(`Upload failed: ${e.message}`, "error"));
+        } else {
+          const objUrl = URL.createObjectURL(file);
+          state.sourceMode = "file";
+          el.sourceVideo.src = objUrl;
+          syncSourceModeUI();
+          el.sourceVideo.onloadedmetadata = () => {
+            const dur = el.sourceVideo.duration || 90;
+            state.duration = dur;
+            state.title = file.name;
+            el.sourceTitle.textContent = file.name;
+            state.heatmap = buildDemoHikes(dur, maxClips);
+            state.clips = pickHikeClipsFromHeatmap(state.heatmap, dur, maxClips);
+            selectClip(state.clips[0].id, false);
+            toast(`Loaded ${file.name} with ${state.clips.length} hike clips!`, "success");
+          };
+        }
+      }
+
+      function loadDemo() {
+        stopClipPlayback();
+        const maxClips = Number(el.clipCountSelect.value);
+        state.jobId = null;
+        state.sourceMode = "demo";
+        state.ytVideoId = null;
+        state.title = "Demo Streamer Highlights (90s)";
+        state.duration = 90;
+        el.sourceTitle.textContent = state.title;
+        el.heatmapBadge.textContent = "Viewer Hike Heatmap";
+        state.heatmap = buildDemoHikes(90, maxClips);
+        state.clips = pickHikeClipsFromHeatmap(state.heatmap, 90, maxClips);
+        syncSourceModeUI();
+        drawDemoFrame(0);
+        selectClip(state.clips[0].id, false);
+      }
+
+      if (HAS_SERVER) {
+        el.modeDot.className = "w-2 h-2 rounded-full bg-emerald-400";
+        el.modeLabel.textContent = "Server Connected (FFmpeg MP4)";
+      }
+      el.modeBadgeBtn.addEventListener("click", () => el.serverModal.classList.remove("hidden"));
+      el.closeServerModal.addEventListener("click", () => el.serverModal.classList.add("hidden"));
+      el.okServerModal.addEventListener("click", () => el.serverModal.classList.add("hidden"));
+
+      el.analyzeBtn.addEventListener("click", handleAnalyze);
+      el.demoBtn.addEventListener("click", loadDemo);
+      el.fileUploadInput.addEventListener("change", (e) => handleFileUpload(e.target.files[0]));
+
+      el.sourcePlayBtn.addEventListener("click", () => {
+        if (state.sourceMode === "file") {
+          if (el.sourceVideo.paused) el.sourceVideo.play().catch(() => {});
+          else el.sourceVideo.pause();
+        } else if (state.sourceMode === "demo") {
+          if (state.isPlayingSource) {
+            state.isPlayingSource = false;
+            cancelAnimationFrame(state.sourceRafId);
+            el.sourcePlayText.textContent = "Play Source";
+          } else {
+            state.isPlayingSource = true;
+            el.sourcePlayText.textContent = "Pause Source";
+            let last = performance.now();
+            const step = (now) => {
+              if (!state.isPlayingSource) return;
+              state.demoTime = (state.demoTime + (now - last) / 1000) % state.duration;
+              last = now;
+              drawDemoFrame(state.demoTime);
+              state.sourceRafId = requestAnimationFrame(step);
+            };
+            state.sourceRafId = requestAnimationFrame(step);
+          }
+        } else if (state.sourceMode === "youtube") {
+          const clip = getActiveClip();
+          updateYouTubePreview(clip, true);
+        }
+      });
+
+      el.facecamToggle.addEventListener("change", () => {
+        state.facecamEnabled = el.facecamToggle.checked;
+        updateCropBoxesUI();
+        if (state.sourceMode === "youtube") {
+          el.ytFacecamTop.classList.toggle("hidden", !state.facecamEnabled);
+        }
+        drawPreviewFrame(Number(el.clipScrub.value));
+      });
+
+      document.querySelectorAll(".fc-preset-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const p = btn.dataset.fcPreset;
+          const presets = {
+            br: { x: 0.72, y: 0.66, w: 0.25, h: 0.29 },
+            bl: { x: 0.03, y: 0.66, w: 0.25, h: 0.29 },
+            tr: { x: 0.72, y: 0.05, w: 0.25, h: 0.29 },
+            tl: { x: 0.03, y: 0.05, w: 0.25, h: 0.29 },
+          };
+          state.facecamBox = { ...presets[p] };
+          updateCropBoxesUI();
+          drawPreviewFrame(Number(el.clipScrub.value));
+        });
+      });
+
+      el.resetMainCrop.addEventListener("click", () => {
+        state.mainBox = { x: 0, y: 0, w: 1, h: 1 };
+        updateCropBoxesUI();
+        drawPreviewFrame(Number(el.clipScrub.value));
+      });
+
+      document.querySelectorAll(".ratio-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.ratio = btn.dataset.ratio;
+          el.ratioBadge.textContent = state.ratio;
+          document.querySelectorAll(".ratio-btn").forEach((b) => {
+            b.className = b === btn
+              ? "ratio-btn py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white transition"
+              : "ratio-btn py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition";
+          });
+          if (state.sourceMode === "youtube") {
+            const dims = RATIO_MAP[state.ratio] || RATIO_MAP["9:16"];
+            el.ytPreviewWrap.style.width = `${dims.cssW}px`;
+            el.ytPreviewWrap.style.height = `${dims.cssH}px`;
+          }
+          drawPreviewFrame(Number(el.clipScrub.value));
+        });
+      });
+
+      el.clipPlayBtn.addEventListener("click", () => {
+        if (state.isPlayingClip) stopClipPlayback();
+        else startClipPlayback();
+      });
+
+      el.clipScrub.addEventListener("input", () => {
+        stopClipPlayback();
+        const clip = getActiveClip();
+        const val = Number(el.clipScrub.value);
+        const dur = clip ? Math.max(1, clip.end - clip.start) : 30;
+        el.clipTimeReadout.textContent = `${val.toFixed(1)}s / ${dur.toFixed(0)}s`;
+        if (state.sourceMode === "file" && clip) {
+          el.sourceVideo.currentTime = clip.start + val;
+        }
+        drawPreviewFrame(val);
+      });
+
+      [el.clipStartInput, el.clipEndInput].forEach((inp) => {
+        inp.addEventListener("change", () => {
+          const clip = getActiveClip();
+          if (!clip) return;
+          clip.start = Math.max(0, Number(el.clipStartInput.value));
+          clip.end = Math.max(clip.start + 1, Math.min(state.duration, Number(el.clipEndInput.value)));
+          selectClip(clip.id, false);
+        });
+      });
+
+      el.captionsToggle.addEventListener("change", () => {
+        state.captionsEnabled = el.captionsToggle.checked;
+        drawPreviewFrame(Number(el.clipScrub.value));
+      });
+
+      document.querySelectorAll(".cap-style-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.captionStyle = btn.dataset.capStyle;
+          document.querySelectorAll(".cap-style-btn").forEach((b) => {
+            b.className = b === btn
+              ? "cap-style-btn py-1.5 rounded-lg text-[11px] font-semibold bg-violet-600 text-white"
+              : "cap-style-btn py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-white";
+          });
+          drawPreviewFrame(Number(el.clipScrub.value));
+        });
+      });
+
+      el.autoCaptionBtn.addEventListener("click", () => {
+        const clip = getActiveClip();
+        if (!clip) return;
+        clip.captions = defaultCaptionsForClip(state.clips.indexOf(clip) + 1);
+        state.captionsEnabled = true;
+        el.captionsToggle.checked = true;
+        renderCaptionsList();
+        drawPreviewFrame(Number(el.clipScrub.value));
+        toast("Auto captions generated for active clip!", "success");
+      });
+
+      el.addCaptionLineBtn.addEventListener("click", () => {
+        const clip = getActiveClip();
+        if (!clip) return;
+        const t = Number(el.clipScrub.value) || 0;
+        clip.captions.push({ start: Number(t.toFixed(1)), end: Number((t + 4).toFixed(1)), text: "New caption line" });
+        renderCaptionsList();
+        drawPreviewFrame(t);
+      });
+
+      el.downloadClipBtn.addEventListener("click", () => exportClip(getActiveClip()));
+      el.downloadAllBtn.addEventListener("click", async () => {
+        for (const clip of state.clips) {
+          await exportClip(clip);
+        }
+      });
+
+      el.heatmapCanvas.addEventListener("click", (e) => {
+        if (!state.clips.length || !state.duration) return;
+        const rect = el.heatmapCanvas.getBoundingClientRect();
+        const clickT = ((e.clientX - rect.left) / rect.width) * state.duration;
+        let nearest = state.clips[0];
+        let bestDist = Infinity;
+        state.clips.forEach((c) => {
+          const d = Math.abs(c.peak_time - clickT);
+          if (d < bestDist) {
+            bestDist = d;
+            nearest = c;
+          }
+        });
+        selectClip(nearest.id, true);
+      });
+
+      enableDragResize(el.mainCropBox, "mainBox");
+      enableDragResize(el.facecamCropBox, "facecamBox");
+      updateCropBoxesUI();
+      loadDemo();
+      window.addEventListener("resize", renderHeatmap);
+      if (window.lucide) window.lucide.createIcons();
+    })();
+  </script>
+</body>
+</html>
