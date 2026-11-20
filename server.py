@@ -496,6 +496,17 @@ async def analyze_link(req: AnalyzeRequest):
     job_dir.mkdir(parents=True, exist_ok=True)
     video_template = str(job_dir / "source.%(ext)s")
 
+    cookies_raw = (req.cookies_txt or "").strip() or os.environ.get("YOUTUBE_COOKIES", "").strip()
+    cookies_file = job_dir / "cookies.txt"
+    has_cookies = False
+    if cookies_raw:
+        cookies_file.write_text(cookies_raw, encoding="utf-8")
+        has_cookies = True
+    elif (BASE_DIR / "cookies.txt").exists():
+        cookies_file = BASE_DIR / "cookies.txt"
+        has_cookies = True
+
+    player_clients = "web,mweb,tv" if has_cookies else "android_vr,android,ios,tv"
     common_yt_args = [
         "--no-playlist",
         "--no-warnings",
@@ -503,15 +514,10 @@ async def analyze_link(req: AnalyzeRequest):
         "--js-runtimes",
         "node",
         "--extractor-args",
-        "youtube:player_client=android_vr,android,ios,tv",
+        f"youtube:player_client={player_clients}",
     ]
-    cookies_raw = (req.cookies_txt or "").strip() or os.environ.get("YOUTUBE_COOKIES", "").strip()
-    cookies_file = job_dir / "cookies.txt"
-    if cookies_raw:
-        cookies_file.write_text(cookies_raw, encoding="utf-8")
+    if has_cookies:
         common_yt_args.extend(["--cookies", str(cookies_file)])
-    elif (BASE_DIR / "cookies.txt").exists():
-        common_yt_args.extend(["--cookies", str(BASE_DIR / "cookies.txt")])
 
     # 1) Fetch metadata & heatmap JSON (with automatic tv_embedded,mediaconnect fallback)
     meta_cmd = ["yt-dlp", *common_yt_args, "--dump-single-json", req.url]
@@ -739,7 +745,9 @@ async def render_clip(req: RenderRequest):
         "-c:v",
         "libx264",
         "-preset",
-        "fast",
+        "veryfast",
+        "-threads",
+        "2",
         "-crf",
         "21",
         "-profile:v",
