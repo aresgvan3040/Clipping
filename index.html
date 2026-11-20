@@ -1059,7 +1059,11 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ url, max_clips: maxClips }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+              let detail = await res.text();
+              try { detail = JSON.parse(detail).detail || detail; } catch (_) {}
+              throw new Error(detail);
+            }
             const data = await res.json();
             state.jobId = data.job_id;
             state.sourceMode = "file";
@@ -1074,7 +1078,21 @@
             selectClip(state.clips[0]?.id, false);
             toast(`Found ${state.clips.length} hike clips!`, "success");
           } catch (err) {
-            toast(`Analyze failed: ${err.message}`, "error");
+            toast(`Server analyze failed: ${err.message}`, "error");
+            const fallbackYt = extractYouTubeId(url);
+            if (fallbackYt) {
+              state.sourceMode = "youtube";
+              state.ytVideoId = fallbackYt;
+              state.duration = 240;
+              state.title = `YouTube Preview (${fallbackYt})`;
+              el.sourceTitle.textContent = state.title;
+              el.heatmapBadge.textContent = "YouTube Preview Fallback";
+              state.heatmap = buildDemoHikes(state.duration, maxClips);
+              state.clips = pickHikeClipsFromHeatmap(state.heatmap, state.duration, maxClips);
+              syncSourceModeUI();
+              selectClip(state.clips[0].id, false);
+              toast("Loaded YouTube embed preview. If on Render/Railway, add YOUTUBE_COOKIES env var if YouTube blocks cloud IP.", "warn");
+            }
           } finally {
             el.analyzeBtn.disabled = false;
           }

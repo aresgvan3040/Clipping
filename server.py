@@ -364,19 +364,37 @@ async def analyze_link(req: AnalyzeRequest):
     job_dir.mkdir(parents=True, exist_ok=True)
     video_template = str(job_dir / "source.%(ext)s")
 
+    common_yt_args = [
+        "--no-playlist",
+        "--no-warnings",
+        "--geo-bypass",
+        "--js-runtimes",
+        "node",
+        "--extractor-args",
+        "youtube:player_client=android_vr,android,ios,tv",
+    ]
+    cookies_env = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    cookies_file = job_dir / "cookies.txt"
+    if cookies_env:
+        cookies_file.write_text(cookies_env, encoding="utf-8")
+        common_yt_args.extend(["--cookies", str(cookies_file)])
+    elif (BASE_DIR / "cookies.txt").exists():
+        common_yt_args.extend(["--cookies", str(BASE_DIR / "cookies.txt")])
+
     # 1) Fetch metadata & heatmap JSON
-    meta_cmd = ["yt-dlp", "--dump-single-json", "--no-playlist", req.url]
+    meta_cmd = ["yt-dlp", *common_yt_args, "--dump-single-json", req.url]
     meta_proc = subprocess.run(meta_cmd, capture_output=True, text=True)
     if meta_proc.returncode != 0:
-        raise HTTPException(status_code=400, detail=f"Failed to analyze URL: {meta_proc.stderr[:400]}")
+        err_msg = (meta_proc.stderr or meta_proc.stdout or "Unknown yt-dlp error").strip()
+        raise HTTPException(status_code=400, detail=f"YouTube analyze failed: {err_msg[:350]}")
     meta = json.loads(meta_proc.stdout)
 
-    # 2) Download MP4 (subtitles fetched separately so 429 on subs never breaks video download)
+    # 2) Download MP4 (flexible format selector + merge to mp4)
     dl_cmd = [
         "yt-dlp",
-        "--no-playlist",
+        *common_yt_args,
         "-f",
-        "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best",
+        "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
         "--merge-output-format",
         "mp4",
         "-o",
@@ -385,7 +403,8 @@ async def analyze_link(req: AnalyzeRequest):
     ]
     dl_proc = subprocess.run(dl_cmd, capture_output=True, text=True)
     if dl_proc.returncode != 0:
-        raise HTTPException(status_code=400, detail=f"Failed to download video: {dl_proc.stderr[:400]}")
+        err_msg = (dl_proc.stderr or dl_proc.stdout or "Unknown download error").strip()
+        raise HTTPException(status_code=400, detail=f"Video download failed: {err_msg[:350]}")
 
     # Best-effort subtitle download
     sub_cmd = [
