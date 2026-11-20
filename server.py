@@ -52,6 +52,7 @@ class CaptionLine(BaseModel):
 class AnalyzeRequest(BaseModel):
     url: str
     max_clips: int = Field(6, ge=2, le=10)
+    cookies_txt: Optional[str] = None
 
 
 class RenderRequest(BaseModel):
@@ -225,9 +226,16 @@ def pick_hike_clips(
     selected_peaks: List[Dict[str, float]] = []
     min_spacing = 28.0 if duration > target_count * 32 else max(12.0, duration / (target_count + 1))
 
+    def calc_start(peak_t: float) -> float:
+        s = max(0.0, peak_t - 20.0)
+        if s + 30.0 > duration:
+            s = max(0.0, duration - 30.0)
+        return s
+
     for pt in sorted_pts:
         t = pt["t"]
-        if all(abs(t - sp["t"]) >= min_spacing for sp in selected_peaks):
+        s = calc_start(t)
+        if all(abs(t - sp["t"]) >= min_spacing and abs(s - calc_start(sp["t"])) >= 12.0 for sp in selected_peaks):
             selected_peaks.append(pt)
         if len(selected_peaks) >= target_count:
             break
@@ -429,17 +437,26 @@ async def analyze_link(req: AnalyzeRequest):
         "--extractor-args",
         "youtube:player_client=android_vr,android,ios,tv",
     ]
-    cookies_env = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    cookies_raw = (req.cookies_txt or "").strip() or os.environ.get("YOUTUBE_COOKIES", "").strip()
     cookies_file = job_dir / "cookies.txt"
-    if cookies_env:
-        cookies_file.write_text(cookies_env, encoding="utf-8")
+    if cookies_raw:
+        cookies_file.write_text(cookies_raw, encoding="utf-8")
         common_yt_args.extend(["--cookies", str(cookies_file)])
     elif (BASE_DIR / "cookies.txt").exists():
         common_yt_args.extend(["--cookies", str(BASE_DIR / "cookies.txt")])
 
-    # 1) Fetch metadata & heatmap JSON
+    # 1) Fetch metadata & heatmap JSON (with automatic tv_embedded,mediaconnect fallback)
     meta_cmd = ["yt-dlp", *common_yt_args, "--dump-single-json", req.url]
     meta_proc = subprocess.run(meta_cmd, capture_output=True, text=True)
+    if meta_proc.returncode != 0 and not cookies_raw:
+        alt_args = [
+            "--no-playlist", "--no-warnings", "--geo-bypass", "--js-runtimes", "node",
+            "--extractor-args", "youtube:player_client=tv_embedded,mediaconnect",
+        ]
+        alt_proc = subprocess.run(["yt-dlp", *alt_args, "--dump-single-json", req.url], capture_output=True, text=True)
+        if alt_proc.returncode == 0:
+            meta_proc = alt_proc
+            common_yt_args = alt_args
     if meta_proc.returncode != 0:
         err_msg = (meta_proc.stderr or meta_proc.stdout or "Unknown yt-dlp error").strip()
         raise HTTPException(status_code=400, detail=f"YouTube analyze failed: {err_msg[:350]}")
